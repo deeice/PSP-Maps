@@ -33,6 +33,11 @@ typedef struct _Placemark
 	struct _Placemark *next;
 } Placemark;
 
+#ifdef GOOGLEMAPS_API2
+#else
+void kml_location(char *response, float *x, float *y, int *z);
+#endif
 void kml_load();
 void kml_free();
 void kml_display(SDL_Surface *dst, float x, float y, int z);
+

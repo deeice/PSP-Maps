@@ -34,7 +34,7 @@
 #include <SDL_rotozoom.h>
 #include <SDL_gfxPrimitives.h>
 #include <SDL_ttf.h>
-#include <SDL_mixer.h>
+//#include <SDL_mixer.h>
 #include <curl/curl.h>
 
 #define DEFAULT_MAP 0
@@ -108,10 +108,16 @@ struct _disk
 } *disk;
 int disk_idx = 0;
 
+#ifdef GOOGLEMAPS_API2
 /* this is the Google Maps API key used for address search
  * this one was created for a dummy domain
  * if it does not work, put your own Google Maps API key here */
 char gkey[100] = "ABQIAAAAAslNJJmKiyq8-oFeyctp9xSFOvRczLyAyj57qAvViVrKq19E6hQUo2EXzTDJCL7m3VQT1DNUPzUWAw";
+#else
+///char locurl[1024] = "http://maps.google.com/maps/geo?output=csv&key=%s&q=%s";
+//char locurl[1024] = "http://maps.googleapis.com/maps/api/geocode/xml?address=%s";
+char locurl[1024] = "http://maps.googleapis.com/maps/api/geocode/json?address=%s";
+#endif
 
 /* user's configuration */
 struct
@@ -210,6 +216,16 @@ enum
 	PSP_BUTTON_LEFT = 2,
 	PSP_BUTTON_DOWN = 4,
 	PSP_BUTTON_RIGHT = 6,
+#ifdef ZIPIT_Z2
+	PSP_BUTTON_SELECT = 7, 
+	PSP_BUTTON_START = SDLK_BACKSPACE, // = 8
+	PSP_BUTTON_X = SDLK_TAB, // SDLK_TAB = 9
+	PSP_BUTTON_R = 11,
+	PSP_BUTTON_L = 12,
+	PSP_BUTTON_A = SDLK_RETURN, // 13
+	PSP_BUTTON_Y = SDLK_COMMA, // 44
+	PSP_BUTTON_B = SDLK_PERIOD, //46
+#else
 	PSP_BUTTON_START = 8,
 	PSP_BUTTON_SELECT = 9,
 	PSP_BUTTON_L = 10,
@@ -218,6 +234,7 @@ enum
 	PSP_BUTTON_A = 13,
 	PSP_BUTTON_B = 14,
 	PSP_BUTTON_X = 15,
+#endif
 	PSP_NUM_BUTTONS
 };
 #else
@@ -467,7 +484,11 @@ void info()
 	lat = atan(exp(M_PI - lat)) / M_PI * 360 - 90;
 	hlineRGBA(screen, 0, WIDTH, 16, 255, 255, 255, 255);
 	boxRGBA(screen, 0, 0, WIDTH, 15, 0, 0, 0, 200);
+#ifdef ZIPIT_Z2
+	sprintf(temp, "Lat %7.3f | Lon %7.3f | %3.1d%% | %s", lat, lon, 100*(16-z)/20, _view[s]);
+#else
 	sprintf(temp, "Lat: %10.6f | Lon: %10.6f | Zoom: %3.1d%% | Type: %s", lat, lon, 100*(16-z)/20, _view[s]);
+#endif
 	print(screen, 5, 0, temp);
 }
 
@@ -548,6 +569,26 @@ void display(int fx)
 	SDL_Flip(screen);
 }
 
+#ifdef ZIPIT_Z2
+latin2utf8(char *src, char *dst, int max)
+{
+  int i;
+  int j = 0;
+  for (i = 0; i < strlen(src); i++)
+  {
+    /* 0xff00 would pass 8bit latin1, but ttf font wont.*/
+    if ((src[i] & 0x80) == 0) // ASCII
+      dst[j++] = src[i];
+    else // Latin1 char.  Convert to UTF-8
+    {
+      dst[j++] = (0xC0 | (src[i] >>6));
+      dst[j++] = (0x80 | (src[i] & 0x3F));
+    }
+  }
+  dst[j] = '\0';
+}
+#endif
+
 /* lookup address */
 void go()
 {
@@ -568,12 +609,32 @@ void go()
 	};
 	
 	box(next, WIDTH/2, HEIGHT/2 - 60, 400, 80, 200);
+#ifdef ZIPIT_Z2
+	print(next, 50, HEIGHT/2 - 90, "Enter address: ");
+#else
 	print(next, 50, HEIGHT/2 - 90, "Enter address, up/down to change letters, start to validate: ");
+#endif
 	input(next, 50, HEIGHT/2 - 60, buffer, 46);
+#ifdef ZIPIT_Z2
+	/* Strip off trailing spaces */
+	while (buffer[strlen(buffer)-1] == ' ')
+	  buffer[strlen(buffer)-1] = 0;
+	/* Convert Latin1 in URL to UTF-8 to conform to RFC 3986 from 2005. */
+	latin2utf8(buffer, request, 100);
+
+	DEBUG("address: %s\n", buffer);
+	address = curl_escape(request, 0);
+#else
 	DEBUG("address: %s\n", buffer);
 	address = curl_escape(buffer, 0);
+#endif
 	
+#ifdef GOOGLEMAPS_API2
 	sprintf(request, "http://maps.google.com/maps/geo?output=csv&key=%s&q=%s", gkey, address);
+#else
+	/* Google geocoding API V3 keys now require https, so try it without a key.*/
+	sprintf(request, locurl, address);
+#endif
 	free(address);
 	
 	rw = SDL_RWFromMem(response, BUFFER_SIZE);
@@ -586,6 +647,7 @@ void go()
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
 	curl_easy_perform(curl);
 	
+#ifdef GOOGLEMAPS_API2
 	ret = sscanf(response, "%d,%d,%f,%f", &code, &precision, &lat, &lon);
 	
 	if (ret == 4 && code == 200)
@@ -594,6 +656,9 @@ void go()
 		z = _zoom[precision];
 		latlon2xy(lat, lon, &x, &y, z);
 	}
+#else
+	kml_location(response, &x, &y, &z);
+#endif
 	
 	SDL_RWclose(rw);
 }
@@ -607,16 +672,40 @@ void directions()
 	box(next, WIDTH/2, HEIGHT/2 - 60, 400, 80, 200);
 	print(next, 50, HEIGHT/2 - 90, "Enter departure address: ");
 	input(next, 50, HEIGHT/2 - 60, buffer, 46);
+#ifdef ZIPIT_Z2
+	/* Strip off trailing spaces */
+	while (buffer[strlen(buffer)-1] == ' ')
+	  buffer[strlen(buffer)-1] = 0;
+	/* Convert Latin1 in URL to UTF-8 to conform to RFC 3986 from 2005. */
+	latin2utf8(buffer, request, 100);
+
+	DEBUG("address: %s\n", buffer);
+	departure = curl_escape(request, 0);
+#else
 	DEBUG("departure: %s\n", buffer);
 	departure = curl_escape(buffer, 0);
-	
+#endif	
 	box(next, WIDTH/2, HEIGHT/2 - 60, 400, 80, 200);
 	print(next, 50, HEIGHT/2 - 90, "Enter destination address: ");
 	input(next, 50, HEIGHT/2 - 60, buffer, 46);
+#ifdef ZIPIT_Z2
+	/* Strip off trailing spaces */
+	while (buffer[strlen(buffer)-1] == ' ')
+	  buffer[strlen(buffer)-1] = 0;
+	/* Convert Latin1 in URL to UTF-8 to conform to RFC 3986 from 2005. */
+	latin2utf8(buffer, request, 100);
+
+	DEBUG("address: %s\n", buffer);
+	destination = curl_escape(request, 0);
+#else
 	DEBUG("destination: %s\n", buffer);
 	destination = curl_escape(buffer, 0);
-	
+#endif	
+#ifdef GOOGLEMAPS_API2
 	sprintf(request, "http://maps.google.com/maps?output=kml&saddr=%s&daddr=%s", departure, destination);
+#else
+	sprintf(request, "http://maps.googleapis.com/maps/api/directions/json?origin=%s&destination=%s", departure, destination);
+#endif	
 	free(departure);
 	free(destination);
 	
@@ -666,9 +755,16 @@ void menu_update(int cache_size)
 	pos.x = MENU_LEFT-80;
 	pos.y = 0;
 	SDL_BlitSurface(logo, NULL, next, &pos);
+#ifdef GOOGLEMAPS_API2
 	print(next, MENU_LEFT+120, 10, "version " VERSION);
 	print(next, MENU_LEFT+120, 25, "http://royale.zerezo.com/psp/");
 	print(next, MENU_LEFT+120, 40, "http://github.com/GameMaker2k/");
+#else
+	// Original code has not kept up with google API changes, so...
+	print(next, MENU_LEFT+120, 10, "version " VERSION);
+	print(next, MENU_LEFT+120, 25, "https://github.com");
+	print(next, MENU_LEFT+120, 40, " /deeice/PSP-Maps");
+#endif
 	print(next, MENU_LEFT-20, MENU_TOP + active * MENU_Y, ">");
 	ENTRY(MENU_VIEW, "Current view: %s", _view[s]);
 	ENTRY(MENU_ADDRESS, "Enter address...");
@@ -1073,8 +1169,8 @@ void init()
 	SDL_JoystickEventState(SDL_ENABLE);
 	if (TTF_Init() == -1)
 		quit();
-	if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0)
-		quit();
+	//if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0)
+		//quit();
 	
 	/* load urls for services */
 	if ((f = fopen("urls.txt", "r")) == NULL)
@@ -1093,6 +1189,16 @@ void init()
 		strcpy(_url[i], buffer);
 	}
 	fclose(f);
+#ifdef GOOGLEMAPS_API2
+#else
+	/* load url for location lookup (so we can add a key later if needed) */
+	if ((f = fopen("locurl.txt", "r")) != NULL)
+	{
+	  if (fscanf(f, "%s", buffer) != 1)
+	    strncpy(locurl, buffer, 1023);
+	  fclose(f);
+	}
+#endif
 	
 	#include "icon.xpm"
 	SDL_WM_SetIcon(IMG_ReadXPMFromArray(icon_xpm), NULL);
