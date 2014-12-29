@@ -8,7 +8,7 @@ DESTDIR ?=
 
 all: pspmaps
 
-pspmaps: pspmaps.c $(ICON) global.o kml.o tile.c io.c cJSON.c
+pspmaps: pspmaps.c $(ICON) global.o kml.o tile.c io.c cJSON.o
 	$(CC) $(CFLAGS) -o pspmaps$(EXEEXT) pspmaps.c $(ICON) global.o kml.o cJSON.o $(LIBS)
 
 global.o: global.c global.h

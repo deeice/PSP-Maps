@@ -7,8 +7,10 @@
 #include <SDL_image.h>
 #include <SDL_gfxPrimitives.h>
 
+#ifdef GOOGLEMAPS_API2
 #include <libxml/parser.h>
 #include <libxml/tree.h>
+#endif
 
 SDL_Surface *marker;
 Placemark *places = NULL;
