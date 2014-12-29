@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS += -O2 -g -Wall `sdl-config --cflags` `curl-config --cflags`
-LIBS += -lSDL_image -lSDL_gfx -lSDL_ttf -lSDL_mixer `sdl-config --libs` `curl-config --libs` $(LDFLAGS)
+LIBS += -lSDL_image -lSDL_gfx -lSDL_ttf `sdl-config --libs` `curl-config --libs` $(LDFLAGS) -lm
 PREFIX ?= /usr/local
 DESTDIR ?= 
 
