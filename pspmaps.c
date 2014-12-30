@@ -218,13 +218,13 @@ enum
 	PSP_BUTTON_RIGHT = 6,
 #ifdef ZIPIT_Z2
 	PSP_BUTTON_SELECT = 7, 
-	PSP_BUTTON_START = SDLK_BACKSPACE, // = 8
-	PSP_BUTTON_X = SDLK_TAB, // SDLK_TAB = 9
-	PSP_BUTTON_R = 11,
-	PSP_BUTTON_L = 12,
+	PSP_BUTTON_START = SDLK_TAB, // = 8
+	PSP_BUTTON_X = SDLK_SPACE, // SDLK_TAB = 9
+	PSP_BUTTON_R = SDLK_PERIOD,
+	PSP_BUTTON_L = SDLK_COMMA,
 	PSP_BUTTON_A = SDLK_RETURN, // 13
-	PSP_BUTTON_Y = SDLK_COMMA, // 44
-	PSP_BUTTON_B = SDLK_PERIOD, //46
+	PSP_BUTTON_Y = SDLK_HOME, // 44
+	PSP_BUTTON_B = SDLK_END, //46
 #else
 	PSP_BUTTON_START = 8,
 	PSP_BUTTON_SELECT = 9,
@@ -828,7 +828,11 @@ void menu()
 						case SDLK_LALT:
 						case PSP_BUTTON_START:
 							return;
+#ifdef ZIPIT_Z2
+							// PSP_BUTTON_X is set to SPACE on zipit.
+#else
 						case SDLK_SPACE:
+#endif
 						case PSP_BUTTON_B:
 						case PSP_BUTTON_A:
 						case PSP_BUTTON_Y:
@@ -1163,26 +1167,45 @@ void init()
 	curl = curl_easy_init();
 	
 	/* setup SDL */
+#ifdef ZIPIT_Z2
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) == -1) {
+		printf("SDL_Init() failed.\n");
+		quit();
+	}
+#else
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) == -1)
 		quit();
+#endif
 	joystick = SDL_JoystickOpen(0);
 	SDL_JoystickEventState(SDL_ENABLE);
-	if (TTF_Init() == -1)
+	if (TTF_Init() == -1){
+#ifdef ZIPIT_Z2
+		printf("TTF_Init() failed.\n");
+#endif
 		quit();
+	}
 	//if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0)
 		//quit();
 	
 	/* load urls for services */
 	if ((f = fopen("urls.txt", "r")) == NULL)
 	{
+#ifdef ZIPIT_Z2
+		printf("cannot open urls file!\n");
+#else
 		DEBUG("cannot open urls file!\n");
+#endif
 		quit();
 	}
 	for (i = 0; i < CHEAT_VIEWS; i++) if (i != NORMAL_VIEWS)
 	{
 		if (fscanf(f, "%s", buffer) != 1)
 		{
+#ifdef ZIPIT_Z2
+			printf("cannot read url for %s\n", _view[i]);
+#else
 			DEBUG("cannot read url for %s\n", _view[i]);
+#endif
 			quit();
 		}
 		_url[i] = malloc(strlen(buffer) + 1);
@@ -1216,9 +1239,12 @@ void init()
 	prev = zoomSurface(screen, 1, 1, 0);
 	next = zoomSurface(screen, 1, 1, 0);
 	#endif
-	if (screen == NULL)
+	if (screen == NULL) {
+#ifdef ZIPIT_Z2
+		printf("SDL_VideoMode() failed.\n");
+#endif
 		quit();
-	
+	}
 	/* load textures */
 	logo = IMG_Load("data/logo.png");
 	na = IMG_Load("data/na.png");
@@ -1305,14 +1331,22 @@ void loop()
 							display(FX_FADE);
 							break;
 						case SDLK_F2:
+#ifdef ZIPIT_Z2
+							// PSP_BUTTON_Y is set to HOME on zipit.
+#else
 						case SDLK_HOME:
+#endif
 						case PSP_BUTTON_Y:
 							s--;
 							if (s < (config.cheat?NORMAL_VIEWS+1:0)) s = (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1;
 							display(FX_FADE);
 							break;
 						case SDLK_F3:
+#ifdef ZIPIT_Z2
+							// PSP_BUTTON_B is set to END on zipit.
+#else
 						case SDLK_END:
+#endif
 						case PSP_BUTTON_B:
 							s++;
 							if (s > (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1) s = (config.cheat?NORMAL_VIEWS+1:0);
