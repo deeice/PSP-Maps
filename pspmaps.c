@@ -37,8 +37,13 @@
 //#include <SDL_mixer.h>
 #include <curl/curl.h>
 
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+int DEFAULT_MAP = 0;
+int DEFAULT_CHEAT_MAP = 18;
+#else
 #define DEFAULT_MAP 0
 #define DEFAULT_CHEAT_MAP 18
+#endif
 
 #define BPP 32
 #define BUFFER_SIZE 200 * 1024
@@ -87,7 +92,7 @@ char response[BUFFER_SIZE];
 int motion_loaded, gps_loaded, dat_loaded = 0;
 
 /* x, y, z are in Google's format: z = [ -4 .. 16 ], x and y = [ 1 .. 2^(17-z) ] */
-int z = 16, s = DEFAULT_MAP;
+int z = 16, s = 0; // DEFAULT_MAP;
 float x = 1, y = 1, dx, dy;
 int active = 0, fav = 0, balancing = 0, cache_zoom = 3;
 
@@ -129,6 +134,9 @@ struct
 	int show_kml;
 	int cheat;
 	int follow_gps;
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+	int last_service;
+#endif
 } config;
 
 /* user's favorite places */
@@ -292,6 +300,26 @@ enum
 	MENU_NUM
 };
 
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+void next_service()
+{
+	do {
+		s++;
+		if (s > (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1) 
+			s = (config.cheat?NORMAL_VIEWS+1:0);
+	} while (_url[s][0] == '#');
+}
+	
+void prev_service()
+{
+	do {
+		s--;
+		if (s < (config.cheat?NORMAL_VIEWS+1:0)) 
+			s = (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1;
+	} while (_url[s][0] == '#');
+}
+#endif
+
 /* quit */
 void quit()
 {
@@ -311,6 +339,9 @@ void quit()
 		/* save configuration */
 		if ((f = fopen("data/config.dat", "wb")) != NULL)
 		{
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+			config.last_service = s;
+#endif
 			fwrite(&config, sizeof(config), 1, f);
 			fclose(f);
 		}
@@ -977,8 +1008,12 @@ void menu()
 							{
 								/* view */
 								case MENU_VIEW:
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+									prev_service();
+#else
 									s--;
 									if (s < (config.cheat?NORMAL_VIEWS+1:0)) s = (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1;
+#endif
 									break;
 								/* favorites */
 								case MENU_LOAD:
@@ -1033,8 +1068,12 @@ void menu()
 							{
 								/* view */
 								case MENU_VIEW:
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+									next_service();
+#else
 									s++;
 									if (s > (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1) s = (config.cheat?NORMAL_VIEWS+1:0);
+#endif
 									break;
 								/* favorites */
 								case MENU_LOAD:
@@ -1123,6 +1162,9 @@ void init()
 	config.danzeff = 1;
 	config.cheat = 0;
 	config.follow_gps = 1;
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+	config.last_service = DEFAULT_MAP;
+#endif
 	
 	/* load configuration if available */
 	if ((f = fopen("data/config.dat", "rb")) != NULL)
@@ -1133,7 +1175,7 @@ void init()
 	
 	/* switch to sky if needed */
 	if (config.cheat) s = DEFAULT_CHEAT_MAP;
-	
+
 	/* allocate disk cache */
 	disk = malloc(sizeof(struct _disk) * config.cache_size);
 	
@@ -1212,6 +1254,24 @@ void init()
 		strcpy(_url[i], buffer);
 	}
 	fclose(f);
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+	/* Pick some defaults that are NOT commented out in urls.txt file */
+	if (_url[DEFAULT_MAP][0] == '#')
+		for (i = 0; i < NORMAL_VIEWS; i++) {
+			if (_url[DEFAULT_MAP][0] != '#') {
+				DEFAULT_MAP = i; break; }
+		}
+	if (_url[DEFAULT_CHEAT_MAP][0] == '#')
+		for (i = NORMAL_VIEWS+1; i < CHEAT_VIEWS; i++) {
+			if (_url[DEFAULT_CHEAT_MAP][0] != '#') {
+				DEFAULT_CHEAT_MAP = i; break; }
+		}
+	/* Set current service and DEFAULT to current service of last session. */
+	s = config.last_service;
+	s--; next_service(); /* decrement, then next_service ensures its good. */
+	if (config.cheat) DEFAULT_CHEAT_MAP = s;
+	else DEFAULT_MAP = s;
+#endif
 #ifdef GOOGLEMAPS_API2
 #else
 	/* load url for location lookup (so we can add a key later if needed) */
@@ -1337,8 +1397,12 @@ void loop()
 						case SDLK_HOME:
 #endif
 						case PSP_BUTTON_Y:
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+							prev_service();
+#else
 							s--;
 							if (s < (config.cheat?NORMAL_VIEWS+1:0)) s = (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1;
+#endif
 							display(FX_FADE);
 							break;
 						case SDLK_F3:
@@ -1348,8 +1412,12 @@ void loop()
 						case SDLK_END:
 #endif
 						case PSP_BUTTON_B:
+#if 1 /* ZIPIT_Z2 URL_DISABLING */
+							next_service();
+#else
 							s++;
 							if (s > (config.cheat?CHEAT_VIEWS:NORMAL_VIEWS)-1) s = (config.cheat?NORMAL_VIEWS+1:0);
+#endif
 							display(FX_FADE);
 							break;
 						case SDLK_F4:
