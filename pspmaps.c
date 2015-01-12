@@ -295,10 +295,23 @@ enum
 	MENU_CACHEZOOM,
 	MENU_CACHESIZE,
 	MENU_CHEAT,
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+	MENU_CACHEOUT,
+#else
 	MENU_EXIT,
+#endif
 	MENU_QUIT,
 	MENU_NUM
 };
+
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+int cacheout = 1;
+char *_cacheops[3] = {
+	"clear",
+	"copy to offline",
+	"move to offline"
+};
+#endif
 
 #if 1 /* ZIPIT_Z2 URL_DISABLING */
 void next_service()
@@ -811,11 +824,122 @@ void menu_update(int cache_size)
 	ENTRY(MENU_CACHEZOOM, "Cache zoom levels: %d", cache_zoom);
 	ENTRY(MENU_CHEAT, "Switch to sky/moon/mars: %s", config.cheat ? "Yes" : "No");
 	ENTRY(MENU_CACHESIZE, "Cache size: %d (~ %d MB)", cache_size, cache_size * 20 / 1000);
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+	ENTRY(MENU_CACHEOUT, "Cache: %s", _cacheops[cacheout]);
+#else
 	ENTRY(MENU_EXIT, "Exit menu");
+#endif
 	ENTRY(MENU_QUIT, "Quit PSP-Maps");
 	SDL_BlitSurface(next, NULL, screen, NULL);
 	SDL_Flip(screen);
 }
+
+void cache_resize(int cache_size)
+{
+	int i;
+	int old;
+	old = config.cache_size;
+	printf("cache_resize(%d  => %d) idx = %d\n", old, cache_size, disk_idx);
+	config.cache_size = cache_size;
+	/* remove data on disk if needed */
+	box(next, WIDTH/2, HEIGHT/2, 400, 70, 200);
+	print(next, 50, HEIGHT/2 - 30, "Cleaning cache...");
+	for (i = config.cache_size; i < disk_idx; i++)
+	{
+		char name[50];
+		float ratio = 1.0 * (i - config.cache_size) / (disk_idx - config.cache_size);
+		boxRGBA(next, WIDTH/2 - 180, HEIGHT/2, WIDTH/2 - 180 + 360.0 * ratio, HEIGHT/2 + 15, 255, 0, 0, 255);
+		diskname(name, i);
+		printf("Unlink cache file%d: %s\n", i, name);
+		unlink(name);
+		SDL_BlitSurface(next, NULL, screen, NULL);
+		SDL_Flip(screen);
+	}
+	disk = realloc(disk, sizeof(struct _disk) * config.cache_size);
+	/* clear newly allocated memory if needed */
+	if (config.cache_size > old)
+		bzero(&disk[old], sizeof(struct _disk) * (config.cache_size - old));
+	else if (disk_idx >= config.cache_size)
+		disk_idx = 0;
+}
+
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+void mkpath(char *dir)
+{
+	char tmp[256];
+	char *p = NULL;
+	size_t len;
+	
+	snprintf(tmp, sizeof(tmp),"%s",dir);
+	len = strlen(tmp);
+	if(tmp[len - 1] == '/')
+		tmp[len - 1] = 0;
+	for(p = tmp + 1; *p; p++)
+		if(*p == '/') {
+			*p = 0;
+			mkdir(tmp, S_IRWXU);
+			*p = '/';
+		}
+	mkdir(tmp, S_IRWXU);
+}
+
+void export_cache(int mv)
+{
+	int i;
+	FILE *infile, *outfile;
+	char cachename[50];
+	char name[256];
+	char buffer[BUFFER_SIZE];
+
+	box(next, WIDTH/2, HEIGHT/2, 400, 70, 200);
+	print(next, 50, HEIGHT/2 - 30, "Extracting cache...");
+	for (i = 0; i < disk_idx; i++)
+	{
+		int x = disk[i].x;
+		int y = disk[i].y;
+		int z = disk[i].z;
+		int s = disk[i].s;
+		float ratio = 1.0 * i / disk_idx;
+
+		if ((_offline[s] == NULL) || !strlen(_offline[s]))
+			continue;
+
+		boxRGBA(next, WIDTH/2 - 180, HEIGHT/2, WIDTH/2 - 180 + 360.0 * ratio, HEIGHT/2 + 15, 255, 0, 0, 255);
+		SDL_BlitSurface(next, NULL, screen, NULL);
+		SDL_Flip(screen);
+
+		diskname(cachename, i);
+		sprintf(name, "offline/%s/%d/%d/", _offline[s], 17-z, x, y);
+		mkpath(name); /* create folders if needed */
+		sprintf(name, "offline/%s/%d/%d/%d.png", _offline[s], 17-z, x, y);
+		if (mv && !rename(cachename, name)){
+			printf("Rename cache file %d to %s\n", i, name);
+			mv++;
+			continue;
+		}
+		if ((infile = fopen(cachename, "rb")) != NULL) {
+			if ((outfile = fopen(name, "wb")) != NULL)
+			{
+				int n;
+				while (0 < (n = fread(buffer, 1, sizeof(buffer), infile)))
+					fwrite(buffer, 1, n, outfile);
+				fclose(outfile);
+			}
+			else printf("Cannot open %s\n",name);
+			fclose(infile);
+			if (mv) {// rename must have failed.  Try copy/unlink instead.
+				unlink(cachename);
+				mv++;
+			}
+		}
+		else printf("Cannot read %s\n",cachename);
+
+		printf("Export cache file %d to %s\n", i, name);
+	}
+	if (mv > 1) // Reset cache index if we actually moved ANY files.
+		disk_idx = 0;
+}
+#endif
 
 /* menu to load/save favorites */
 void menu()
@@ -955,6 +1079,7 @@ void menu()
 											gettile(i, j, z-k, s);
 											SDL_BlitSurface(next, NULL, screen, NULL);
 											SDL_Flip(screen);
+
 										}
 									}
 									break;
@@ -967,34 +1092,28 @@ void menu()
 								/* disk cache */
 								case MENU_CACHESIZE:
 									if (config.cache_size != cache_size)
-									{
-										int old;
-										old = config.cache_size;
-										config.cache_size = cache_size;
-										/* remove data on disk if needed */
-										box(next, WIDTH/2, HEIGHT/2, 400, 70, 200);
-										print(next, 50, HEIGHT/2 - 30, "Cleaning cache...");
-										for (i = config.cache_size; i < disk_idx; i++)
-										{
-											char name[50];
-											float ratio = 1.0 * (i - config.cache_size) / (disk_idx - config.cache_size);
-											boxRGBA(next, WIDTH/2 - 180, HEIGHT/2, WIDTH/2 - 180 + 360.0 * ratio, HEIGHT/2 + 15, 255, 0, 0, 255);
-											diskname(name, i);
-											unlink(name);
-											SDL_BlitSurface(next, NULL, screen, NULL);
-											SDL_Flip(screen);
-										}
-										disk = realloc(disk, sizeof(struct _disk) * config.cache_size);
-										/* clear newly allocated memory if needed */
-										if (config.cache_size > old)
-											bzero(&disk[old], sizeof(struct _disk) * (config.cache_size - old));
-									}
+										cache_resize(cache_size);
 									break;
 								/* exit menu */
 								case MENU_VIEW:
 								/* view */
+									return;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								case MENU_CACHEOUT:
+									if (cacheout) {
+										printf("Exporting cache...\n");
+										export_cache(cacheout-1);
+									}
+									else {
+										printf("wiping cache...\n");
+										cache_resize(0);
+										cache_resize(cache_size);
+									}
+									break;
+#else
 								case MENU_EXIT:
 									return;
+#endif
 								/* quit PSP-Maps */
 								case MENU_QUIT:
 									quit();
@@ -1058,6 +1177,11 @@ void menu()
 									if (cache_size == 0) cache_size = MAX_CACHESIZE;
 									if (cache_size < 100) cache_size = 0;
 									break;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								case MENU_CACHEOUT:
+									if (--cacheout < 0)	cacheout = 2;
+									break;
+#endif
 							}
 							menu_update(cache_size);
 							break;
@@ -1118,6 +1242,11 @@ void menu()
 									if (cache_size == 0) cache_size = 100;
 									if (cache_size > MAX_CACHESIZE) cache_size = 0;
 									break;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								case MENU_CACHEOUT:
+									if (++cacheout > 2)	cacheout = 0;
+									break;
+#endif
 							}
 							menu_update(cache_size);
 							break;

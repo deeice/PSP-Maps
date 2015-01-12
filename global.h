@@ -1,4 +1,4 @@
-#define VERSION "2.4.0.0"
+#define VERSION "2.4.1.0"
 
 #ifdef GP2X
 #define WIDTH 320
