@@ -22,6 +22,8 @@
 
 #include "global.h"
 #include "kml.h"
+#include "gmapjson.h"
+
 
 #include <math.h>
 #include <stdlib.h>
@@ -609,6 +611,7 @@ void display(int fx)
 	/* show informations */
 	if (config.show_info) info();
 	if (config.show_kml) kml_display(screen, x, y, z);
+	if (config.show_kml) gmapjson_display(screen, x, y, z);
 	
 	SDL_Flip(screen);
 }
@@ -701,7 +704,7 @@ void go()
 		latlon2xy(lat, lon, &x, &y, z);
 	}
 #else
-	kml_location(response, &x, &y, &z);
+	gmapjson_location(response, &x, &y, &z);
 #endif
 	
 	SDL_RWclose(rw);
@@ -753,11 +756,19 @@ void directions()
 	free(departure);
 	free(destination);
 	
+#ifdef GOOGLEMAPS_API2
 	if ((kml = fopen("kml/route.kml", "w")) == NULL)
 	{
 		DEBUG("cannot open/create kml/route.kml\n");
 		return;
 	}
+#else
+	if ((kml = fopen("kml/route.json", "w")) == NULL)
+	{
+		DEBUG("cannot open/create kml/route.json\n");
+		return;
+	}
+#endif
 	
 	//curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
@@ -772,6 +783,7 @@ void directions()
 	/* reload KML files */
 	kml_free();
 	kml_load();
+	gmapjson_load();
 	
 	/* force KML display */
 	config.show_kml = 1;
@@ -1442,6 +1454,7 @@ void init()
 	
 	/* load KML */
 	kml_load();
+	gmapjson_load();
 	
 	/* display initial map */
 	display(FX_FADE);
@@ -1471,6 +1484,12 @@ void loop()
 						action = event.jbutton.button;
 					switch (action)
 					{
+						case SDLK_BACKSPACE:
+							{static int offset=0;
+							offset = show_rtf(screen,"data/font.ttf","/tmp/route.rtf",offset);
+							display(FX_NONE);
+							}
+							break;
 						case SDLK_LEFT:
 						case PSP_BUTTON_LEFT:
 							x -= DIGITAL_STEP;

@@ -16,6 +16,24 @@ void print(SDL_Surface *dst, int x, int y, char *text)
 	SDL_FreeSurface(src);
 }
 
+/* prints a message using the bitmap font */
+void printcolor(SDL_Surface *dst, int x, int y, char *text, int c)
+{
+	SDL_Rect pos;
+	SDL_Surface *src;
+	SDL_Color color = {0xff&(c>>16), 0xff&(c>>8), 0xff&(c)};
+	if (font == NULL) return;
+	pos.x = x;
+	pos.y = y;
+#ifdef ZIPIT_Z2_UTF8 
+	src = TTF_RenderUTF8_Blended(font, text, color);
+#else
+	src = TTF_RenderText_Blended(font, text, color);
+#endif
+	SDL_BlitSurface(src, NULL, dst, &pos);
+	SDL_FreeSurface(src);
+}
+
 void input_update(SDL_Surface *dst, int x, int y, char *text, int active, int flip)
 {
 	SDL_Rect pos;
