@@ -281,3 +281,55 @@ int show_rtf(SDL_Surface *screen, char *fontname, char *filename, int offset)
     RTF_FreeContext(ctx);
     return(offset);
 }
+
+extern char txtbuf[];
+
+void rtf_update()
+{
+  static char buf[1032];
+  char *s, *p, *q;
+  int i, j, k;
+  unsigned int u;
+  FILE *f;
+  
+  if (NULL == (f=fopen("/tmp/route.rtf","w")))
+    return;
+  // Set Code Page 1252 for latin1.  Not sure if that or utf8 here...
+  fprintf(f,"{\\rtf1\\ansi\\ansicpg1252\\deff0 {\\fonttbl {\\f0 Courier;}}\n");
+  fprintf(f,"{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;\\red0\\green0\\blue255;}\n");
+  for (s = strtok(txtbuf, "\n"); s; s = strtok(NULL, "\n")){
+    //j = strlen(s); if (j >1031) j = 1031;
+    q = buf;
+    for (k = 0; *s; s+=i) {
+      u = UTF8_to_UNICODE(s, &i);
+      if (u < 0x80)
+	q[k++] = u; // ok for latin1, although not really RTF standard.
+      else{
+	if (u < 0x100)
+	  sprintf(q+k, "\\u%d%c", u, u);  // Maybe try a codepage escape?
+	else
+	  sprintf(q+k, "\\u%d?", u);
+	k += strlen(q+k);
+      }
+    }
+    q[k] = 0;
+    
+    //
+    // Need to change utf8 to \\uNNNN? sequence and \,{.} to \\,\{,\} sequences.
+    //if ((*p == '\\') ||(*p == '}') ||(*p == '}'))
+    //  *q++ = '\\';
+    //
+    
+    p = buf;
+    if (p[0] == '(')
+      fprintf(f, "\\cf3\n%s\\line\n\\cf1\n",p);
+    else if (p[0] == ' ')
+      fprintf(f, "\\cf2\n%s\\line\n\\cf1\n",p);
+    else
+      fprintf(f, "%s\\line\n",p);
+    p[strlen(p)] = '\n'; // Replace nulls added by strtok.
+  }
+  fprintf(f,"}\n");
+  fclose(f);
+}
+

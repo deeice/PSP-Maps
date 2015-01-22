@@ -140,71 +140,6 @@ char *html2txt(char *s)
 	return(buf);
 }
 
-void txt_update()
-{
-	static char buf[1032];
-	char *s, *p, *q;
-	int i, j, k;
-	unsigned int u;
-	FILE *f;
-
-	if (NULL == (f=fopen("/tmp/route.rtf","w")))
-		return;
-	// Set Code Page 1252 for latin1.  Not sure if that or utf8 here...
-	fprintf(f,"{\\rtf1\\ansi\\ansicpg1252\\deff0 {\\fonttbl {\\f0 Courier;}}\n");
-	fprintf(f,"{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;\\red0\\green0\\blue255;}\n");
-	for (s = strtok(txtbuf, "\n"); s; s = strtok(NULL, "\n")){
-		j = strlen(s); if (j >1031) j = 1031;
-		q = buf;
-		i = k = 0;
-    unsigned char c = s[i++];
-    while(c)
-    {
-        if((c & 0x80) == 0) {
-            u = c;
-        } else if((c & 0xe0) == 0xe0) {
-            u = (c & 0x1F) << 12;
-	        c = s[i++];
-            u |= (c & 0x3F) << 6;
-	        c = s[i++];
-            u |= (c & 0x3F);
-        } else {
-            u = (c & 0x3F) << 6;
-	        c = s[i++];
-            u |= (c & 0x3F);
-        }
-				if (u < 0x80)
-					q[k++] = u; // ok for latin1.
-				else{
-					if (u < 0x100)
-						sprintf(q+k, "\\u%d%c", u, u);
-					else
-						sprintf(q+k, "\\u%d?", u);
-					k += strlen(q+k);
-				}
-        c = s[i++];
-    }
-		q[k] = 0;
-
-		//
-		// Need to change utf8 to \\uNNNN? sequence and \,{.} to \\,\{,\} sequences.
-		//if ((*p == '\\') ||(*p == '}') ||(*p == '}'))
-		//  *q++ = '\\';
-		//
-
-		p = buf;
-		if (p[0] == '(')
-			fprintf(f, "\\cf3\n%s\\line\n\\cf1\n",p);
-		else if (p[0] == ' ')
-			fprintf(f, "\\cf2\n%s\\line\n\\cf1\n",p);
-		else
-			fprintf(f, "%s\\line\n",p);
-		p[strlen(p)] = '\n'; // Replace nulls added by strtok.
-	}
- fprintf(f,"}\n");
- fclose(f);
-}
-
 void dist_parse(cJSON * step)
 {
 	char *s = txtbuf+strlen(txtbuf);
@@ -296,8 +231,6 @@ void gmapjson_parse(char *file)
 	}
 	cJSON_Delete(json);
 	free(text);
-
-	txt_update();
 }
 
 void gmapjson_location(char *text, float *x, float *y, int *z)
@@ -367,6 +300,8 @@ void gmapjson_load()
 				sprintf(file, "kml/%s.json", entry->d_name);
 				gmapjson_parse(file);
 			}
+
+	rtf_update();
 }
 
 fatLineColor(SDL_Surface *dst, int x1, int y1, int x2, int y2, int color)

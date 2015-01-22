@@ -12,7 +12,7 @@
 
 SDL_Surface *marker;
 Placemark *places = NULL;
-char txtbuf[16384];
+char txtbuf[32768];
 
 char *desc2txt(char *s)
 {
