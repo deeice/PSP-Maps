@@ -243,11 +243,13 @@ int show_rtf(SDL_Surface *screen, char *fontname, char *filename, int offset)
                         offset = (height - screen->h);
                         break;
                     case SDLK_PAGEUP:
+                    case SDLK_COMMA:
                         offset -= screen->h;
                         if ( offset < 0 )
                             offset = 0;
                         break;
                     case SDLK_PAGEDOWN:
+                    case SDLK_PERIOD:
                     case SDLK_SPACE:
                         offset += screen->h;
                         if ( offset > (height - screen->h) )
