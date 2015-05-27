@@ -5,8 +5,19 @@
 #include <pthread.h>
 #include <errno.h>
 
+#include <string.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/io.h>
+
 #include "gps.h"
 #include "gpsdclient.h"
+
+#include "minmea.h"
 
 /******************************************************************/
 enum unit (*GPSD_units)(void);
@@ -35,6 +46,53 @@ static int state = 0;		/* or MODE_NO_FIX=1, MODE_2D=2, MODE_3D=3 */
 static float gps_latitude;
 static float gps_longitude;
 static float gps_altitude;
+
+/******************************************************************/
+/* NMEA-0183 standard baud rate */
+#define BAUDRATE B4800
+
+static char NMEA_device[256] = "/dev/ttyUSB0";
+static FILE *NMEA_fp = NULL;
+
+/******************************************************************/
+static int openPort(const char *tty, int baud)
+{
+    int status;
+    int fd;
+    struct termios newtio;
+
+    /* open the tty */
+    fd = open(tty, O_RDWR | O_NOCTTY);
+    if (fd < 0) {
+	return fd;
+    }
+
+    /* flush serial port */
+    status = tcflush(fd, TCIFLUSH);
+    if (status < 0) {
+	close(fd);
+	return -1;
+    }
+
+    /* get current terminal state */
+    tcgetattr(fd, &newtio);
+
+    /* set to raw terminal type */
+    newtio.c_cflag = baud | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNBRK | IGNPAR;
+    newtio.c_oflag = 0;
+
+    /* control parameters */
+    newtio.c_cc[VMIN] = 1;	/* block for at least one charater */
+
+    /* set its new attributes */
+    status = tcsetattr(fd, TCSANOW, &newtio);
+    if (status < 0) {
+	close(fd);
+	return -1;
+    }
+    return fd;
+}
 
 /******************************************************************/
 int GPS_get_fix(float *latitude, float *longitude)
@@ -79,40 +137,6 @@ void* GPS_thread_run(void *arg)
   unsigned int flags = WATCH_ENABLE;
   int wait_clicks = 0;  /* cycles to wait before gpsd timeout */
 
-  switch ((*GPSD_units)()) {
-  case imperial:
-    altfactor = METERS_TO_FEET;
-    altunits = "ft";
-    speedfactor = MPS_TO_MPH;
-    speedunits = "mph";
-    break;
-  case nautical:
-    altfactor = METERS_TO_FEET;
-    altunits = "ft";
-    speedfactor = MPS_TO_KNOTS;
-    speedunits = "knots";
-    break;
-  case metric:
-    altfactor = 1;
-    altunits = "m";
-    speedfactor = MPS_TO_KPH;
-    speedunits = "kph";
-    break;
-  default:
-    /* leave the default alone */
-    break;
-  }
-
-  (*GPSD_source_spec)(NULL, &source);
-
-  /* Open the stream to gpsd. */
-  if ((*GPS_open)(source.server, source.port, &gpsdata) != 0) {
-    (void)fprintf(stderr,
-		  "No gpsd running or network error: %d, %s\n",
-		  errno, GPS_errstr(errno));
-    pthread_exit(NULL); // die(errno == 0 ? GPS_GONE : GPS_ERROR);
-  }
-
   if (source.device != NULL)
     flags |= WATCH_DEVICE;
   (void)(*GPS_stream)(&gpsdata, flags, source.device);
@@ -153,20 +177,80 @@ void* GPS_thread_run(void *arg)
 /******************************************************************/
 int GPS_thread_init(void)
 {
-    // Initialize the mutex
-    if(pthread_mutex_init(&gps_mutex, NULL))
-    {
-      fprintf(stderr,"Unable to initialize a mutex\n");
-      return -1;
-    }
+  switch ((*GPSD_units)()) {
+  case imperial:
+    altfactor = METERS_TO_FEET;
+    altunits = "ft";
+    speedfactor = MPS_TO_MPH;
+    speedunits = "mph";
+    break;
+  case nautical:
+    altfactor = METERS_TO_FEET;
+    altunits = "ft";
+    speedfactor = MPS_TO_KNOTS;
+    speedunits = "knots";
+    break;
+  case metric:
+    altfactor = 1;
+    altunits = "m";
+    speedfactor = MPS_TO_KPH;
+    speedunits = "kph";
+    break;
+  default:
+    /* leave the default alone */
+    break;
+  }
 
-    if(pthread_create(&gps_thread, NULL, &GPS_thread_run, NULL))
-    {
-      fprintf(stderr,"Unable to spawn thread\n");
-      return -1;
-    }
+  (*GPSD_source_spec)(NULL, &source);
 
-    return 0;
+  /* Open the stream to gpsd. */
+  if ((*GPS_open)(source.server, source.port, &gpsdata) != 0) {
+    (void)fprintf(stderr,
+		  "No gpsd running or network error: %d, %s\n",
+		  errno, GPS_errstr(errno));
+    return -1;
+  }
+
+  if(pthread_create(&gps_thread, NULL, &GPS_thread_run, NULL))
+  {
+      fprintf(stderr,"Unable to spawn gpsd thread\n");
+      return -1;
+  }
+
+  return 0;
+}
+
+/******************************************************************/
+void* NMEA_thread_run(void *arg)
+{
+    char line[MINMEA_MAX_LENGTH];
+    int i;
+    while (fgets(line, sizeof(line), NMEA_fp) != NULL) {
+        switch (minmea_sentence_id(line, false)) {
+            case MINMEA_SENTENCE_RMC: {
+                struct minmea_sentence_rmc frame;
+                if (minmea_parse_rmc(&frame, line)) {
+		  pthread_mutex_lock(&gps_mutex);            // Lock the mutex
+		  // Copy the GPS fix data to protected zone
+		  gps_latitude = minmea_tocoord(&frame.latitude);
+		  gps_longitude = minmea_tocoord(&frame.longitude);
+		  pthread_mutex_unlock(&gps_mutex);          // Unlock the mutex
+                }
+            } break;
+            case MINMEA_SENTENCE_GGA: {
+                struct minmea_sentence_gga frame;
+                if (minmea_parse_gga(&frame, line)) {
+		  pthread_mutex_lock(&gps_mutex);            // Lock the mutex
+		  // Copy the GPS fix data to protected zone
+		  state = frame.fix_quality+1;
+		  pthread_mutex_unlock(&gps_mutex);          // Unlock the mutex
+		}
+            } break;
+            default:
+              break;
+        }
+    }
+  return NULL;
 }
 
 /******************************************************************/
@@ -174,45 +258,93 @@ int GPS_load(void)
 {
   void *handle;
   char *error;
+  int retval = 1; // Hope for the best.  Assume success.
 
-  printf("hello\n");
+  fprintf(stderr, "Creating gps mutex\n");
 
-  handle = dlopen("libgps.so.21", RTLD_LAZY);
-  if (!handle) {
-    fprintf(stderr, "%s\n", dlerror());
+  // Initialize the mutex
+  if(pthread_mutex_init(&gps_mutex, NULL))
+  {
+    fprintf(stderr,"Unable to initialize a mutex\n");
     return -1;
   }
 
-  dlerror();    /* Clear any existing error */
+  handle = dlopen("libgps.so.21", RTLD_LAZY);
+  if (handle)
+  {
+    dlerror();    /* Clear any existing error */
 
-  *(void **) (&GPSD_units) = dlsym(handle, "gpsd_units");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gpsd_units\n", error);
-  *(void **) (&GPSD_source_spec) = dlsym(handle, "gpsd_source_spec");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gpsd_source_specr\n", error);
+    *(void **) (&GPSD_units) = dlsym(handle, "gpsd_units");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gpsd_units\n", error);
+    *(void **) (&GPSD_source_spec) = dlsym(handle, "gpsd_source_spec");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gpsd_source_specr\n", error);
 
-  *(void **) (&GPS_open) = dlsym(handle, "gps_open");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_open\n", error);
-  *(void **) (&GPS_close) = dlsym(handle, "gps_close");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_close\n", error);
-  *(void **) (&GPS_read) = dlsym(handle, "gps_read");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_read\n", error);
-  *(void **) (&GPS_unpack) = dlsym(handle, "gps_unpack");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_unpack\n", error);
-  *(void **) (&GPS_waiting) = dlsym(handle, "gps_waiting");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_waiting\n", error);
-  *(void **) (&GPS_stream) = dlsym(handle, "gps_stream");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_stream\n", error);
-  *(void **) (&GPS_errstr) = dlsym(handle, "gps_errstr");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_errstr\n", error);
-  *(void **) (&GPS_enable_debug) = dlsym(handle, "gps_enable_debug");
-  if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_enable_debug\n", error);
+    *(void **) (&GPS_open) = dlsym(handle, "gps_open");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_open\n", error);
+    *(void **) (&GPS_close) = dlsym(handle, "gps_close");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_close\n", error);
+    *(void **) (&GPS_read) = dlsym(handle, "gps_read");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_read\n", error);
+    *(void **) (&GPS_unpack) = dlsym(handle, "gps_unpack");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_unpack\n", error);
+    *(void **) (&GPS_waiting) = dlsym(handle, "gps_waiting");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_waiting\n", error);
+    *(void **) (&GPS_stream) = dlsym(handle, "gps_stream");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_stream\n", error);
+    *(void **) (&GPS_errstr) = dlsym(handle, "gps_errstr");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_errstr\n", error);
+    *(void **) (&GPS_enable_debug) = dlsym(handle, "gps_enable_debug");
+    if ((error = dlerror()) != NULL) fprintf(stderr, "%s - gps_enable_debug\n", error);
 
-  printf("Found gpsd DLL.\n");
+    printf("Found gpsd DLL.\n");
 
-  if (GPS_thread_init()) {
-    printf("gpsd Thread failure.\n");
-    return -2;
+    if (GPS_thread_init()) {
+      fprintf(stderr, "Skipping gpsd thread.\n");
+      retval = -2;
+    }
+
+  }
+  else {
+    fprintf(stderr, "%s\n", dlerror());
+    retval = -3;
   }
 
-  return 1;
+  // If no luck with gpsd, try raw NMEA.
+  if (retval < 0)
+  {
+    int fd;
+
+    fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
+    fd = openPort(NMEA_device, B4800);
+    if (fd < 0) {
+      sprintf(NMEA_device, "/dev/ttyUSB1");
+      fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
+      fd = openPort(NMEA_device, B4800);
+    }
+    if (fd < 0) {
+      fprintf(stderr,"Failed to open port %s\n", NMEA_device);
+      return -4;
+    }
+    else {
+      fprintf(stderr,"Attempting raw NMEA on fileno %d.\n", fd);
+      NMEA_fp = fdopen(fd, "rw");
+    }
+    if (!NMEA_fp){
+      fprintf(stderr,"Failed to fdopen port %s\n", NMEA_device);
+      return -4;
+    }
+    else {
+      fprintf(stderr,"Launching NMEA thread.\n");
+      if(pthread_create(&gps_thread, NULL, &NMEA_thread_run, NULL))
+      {
+	fprintf(stderr,"Unable to spawn NMEA thread\n");
+	return -5;
+      }
+      else
+	retval = 1;
+    }
+  }
+
+  return retval;
 }
+

@@ -1634,6 +1634,19 @@ void loop()
 				display(FX_NONE);
 			}
 		}
+		#else
+		if (gps_loaded && config.follow_gps)
+		{
+			extern int GPS_get_fix(float *latitude, float *longitude);
+			float latitude, longitude;
+			if (GPS_get_fix(&latitude, &longitude))
+			{
+				latlon2xy(latitude, longitude, &x, &y, z);
+				dx = 0;
+				dy = 0;
+				display(FX_NONE);
+			}
+		}
 		#endif
 		
 		x += dx;
@@ -1678,6 +1691,9 @@ int main(int argc, char *argv[])
 	SetupCallbacks();
 	setupGu();
 	netDialog();
+	#else
+	extern int GPS_load(void);
+	gps_loaded = GPS_load() >= 0;
 	#endif
 	init();
 	loop();
