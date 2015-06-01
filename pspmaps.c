@@ -1638,14 +1638,24 @@ void loop()
 		if (gps_loaded && config.follow_gps)
 		{
 			extern int GPS_get_fix(float *latitude, float *longitude);
+                        static int gps_ctr = 0;
 			float latitude, longitude;
-			if (GPS_get_fix(&latitude, &longitude))
+                        gps_ctr++;
+                        gps_ctr &= 0xf;
+			if ((gps_ctr == 0) && GPS_get_fix(&latitude, &longitude))
 			{
-				latlon2xy(latitude, longitude, &x, &y, z);
-				dx = 0;
-				dy = 0;
-				display(FX_NONE);
+                                static float save_lat = 0.0;
+                                static float save_lon = 0.0;
+                                if ((save_lat != latitude) || (save_lon != longitude)) {
+                                    save_lat = latitude;
+                                    save_lon = longitude;
+                                    latlon2xy(latitude, longitude, &x, &y, z);
+                                    dx = 0;
+                                    dy = 0;
+                                    display(FX_NONE);
+                                }
 			}
+
 		}
 		#endif
 		
