@@ -303,7 +303,15 @@ SDL_Surface* gettile(int x, int y, int z, int s)
 		savememory(x, y, z, s, tile);
 		return tile;
 	}
-	
+
+        extern int netOff;
+        
+	if (netOff) {
+            tile = zoomSurface(na, 1, 1, 0);
+            savememory(x, y, z, s, tile);
+            return tile;
+        }
+
 	/* try internet */
 	rw = getnet(x, y, z, s);
 	
