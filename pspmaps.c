@@ -92,6 +92,7 @@ TTF_Font *font;
 CURL *curl;
 char response[BUFFER_SIZE];
 int motion_loaded, gps_loaded, dat_loaded = 0;
+int netOff = 0;
 
 /* x, y, z are in Google's format: z = [ -4 .. 16 ], x and y = [ 1 .. 2^(17-z) ] */
 int z = 16, s = 0; // DEFAULT_MAP;
@@ -293,13 +294,17 @@ enum
 	MENU_KML,
 	MENU_GPS,
 	MENU_EFFECT,
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+	MENU_OFFLINE,
+	MENU_CACHEZOOM,
+	MENU_CACHESIZE,
+	MENU_CACHEOUT,
+	MENU_CHEAT,
+#else
 	MENU_KEYBOARD,
 	MENU_CACHEZOOM,
 	MENU_CACHESIZE,
 	MENU_CHEAT,
-#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
-	MENU_CACHEOUT,
-#else
 	MENU_EXIT,
 #endif
 	MENU_QUIT,
@@ -832,13 +837,17 @@ void menu_update(int cache_size)
 	ENTRY(MENU_KML, "Show KML data: %s", config.show_kml ? "Yes" : "No");
 	ENTRY(MENU_GPS, "Center map on GPS: %s", config.follow_gps ? "Yes" : "No");
 	ENTRY(MENU_EFFECT, "Transition effects: %s", config.use_effects ? "Yes" : "No");
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+	ENTRY(MENU_OFFLINE, "Offline only: %s", netOff ? "Yes" : "No");
+	ENTRY(MENU_CACHEZOOM, "Cache zoom levels: %d", cache_zoom);
+	ENTRY(MENU_CHEAT, "Switch to sky/moon/mars: %s", config.cheat ? "Yes" : "No");
+	ENTRY(MENU_CACHESIZE, "Cache size: %d (~ %d MB)", cache_size, cache_size * 20 / 1000);
+	ENTRY(MENU_CACHEOUT, "Cache: %s", _cacheops[cacheout]);
+#else
 	ENTRY(MENU_KEYBOARD, "Keyboard type: %s", config.danzeff ? "Danzeff" : "Arcade");
 	ENTRY(MENU_CACHEZOOM, "Cache zoom levels: %d", cache_zoom);
 	ENTRY(MENU_CHEAT, "Switch to sky/moon/mars: %s", config.cheat ? "Yes" : "No");
 	ENTRY(MENU_CACHESIZE, "Cache size: %d (~ %d MB)", cache_size, cache_size * 20 / 1000);
-#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
-	ENTRY(MENU_CACHEOUT, "Cache: %s", _cacheops[cacheout]);
-#else
 	ENTRY(MENU_EXIT, "Exit menu");
 #endif
 	ENTRY(MENU_QUIT, "Quit PSP-Maps");
@@ -1058,10 +1067,19 @@ void menu()
 								case MENU_EFFECT:
 									config.use_effects = !config.use_effects;
 									break;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								/* Off the network */
+								case MENU_OFFLINE:
+									netOff = !netOff;
+									if (!netOff) /* clear memory cache */
+									  bzero(memory, sizeof(memory));
+									break;
+#else
 								/* keyboard */
 								case MENU_KEYBOARD:
 									config.danzeff = !config.danzeff;
 									break;
+#endif
 								/* zoom cache */
 								case MENU_CACHEZOOM:
 									box(next, WIDTH/2, HEIGHT/2, 400, 70, 200);
@@ -1168,10 +1186,19 @@ void menu()
 								case MENU_EFFECT:
 									config.use_effects = !config.use_effects;
 									break;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								/* Off the network */
+								case MENU_OFFLINE:
+									netOff = !netOff;
+									if (!netOff) /* clear memory cache */
+									  bzero(memory, sizeof(memory));
+									break;
+#else
 								/* keyboard */
 								case MENU_KEYBOARD:
 									config.danzeff = !config.danzeff;
 									break;
+#endif
 								/* zoom cache */
 								case MENU_CACHEZOOM:
 									cache_zoom--;
@@ -1233,10 +1260,19 @@ void menu()
 								case MENU_EFFECT:
 									config.use_effects = !config.use_effects;
 									break;
+#ifdef ZIPIT_Z2 /* ENABLE_OFFLINE_EXPORT */
+								/* Off the network */
+								case MENU_OFFLINE:
+									netOff = !netOff;
+									if (!netOff) /* clear memory cache */
+									  bzero(memory, sizeof(memory));
+									break;
+#else
 								/* keyboard */
 								case MENU_KEYBOARD:
 									config.danzeff = !config.danzeff;
 									break;
+#endif
 								/* zoom cache */
 								case MENU_CACHEZOOM:
 									cache_zoom++;
@@ -1285,7 +1321,7 @@ void menu()
 }
 
 /* init */
-void init()
+void init(int favNum)
 {
 	int flags;
 	FILE *f;
@@ -1456,6 +1492,15 @@ void init()
 	kml_load();
 	gmapjson_load();
 	
+	if ((favNum >= 0) && (favNum < NUM_FAVORITES) &&  favorite[favNum].ok)
+	{
+	  fav = favNum;
+	  x = favorite[fav].x;
+	  y = favorite[fav].y;
+	  z = favorite[fav].z;
+	  s = favorite[fav].s;
+	}
+
 	/* display initial map */
 	display(FX_FADE);
 }
@@ -1568,6 +1613,7 @@ void loop()
 #endif
 							display(FX_FADE);
 							break;
+						case SDLK_i:
 						case SDLK_F4:
 						case PSP_BUTTON_A:
 							config.show_info = !config.show_info;
@@ -1578,6 +1624,24 @@ void loop()
 						case PSP_BUTTON_START:
 							menu();
 							display(FX_FADE);
+							break;
+						case SDLK_c:
+                                                        config.follow_gps = !config.follow_gps;
+							break;
+						case SDLK_d:
+                                                        directions();
+							break;
+						case SDLK_g:
+                                                        go();
+							break;
+						case SDLK_k:
+                                                        config.show_kml = !config.show_kml;
+							display(FX_NONE);
+							break;
+						case SDLK_o:
+                                                        netOff = !netOff;
+							if (!netOff) /* clear memory cache */
+							  bzero(memory, sizeof(memory));
 							break;
 						default:
 							break;
@@ -1691,6 +1755,30 @@ int gpsLoad()
 
 int main(int argc, char *argv[])
 {
+  int i;
+  int favNum = -1;
+  char *favNam = NULL;
+  for (i = 1; i < argc; i++) {
+    if (argv[i][0] == '-') {
+      switch (argv[i][1])
+      {
+      case 'o':
+	netOff = 1;
+	break;
+      case 'f':
+	if (isdigit(argv[i][2]))
+	  favNum = atoi(&(argv[i][2]));
+	else if (++i < argc)
+	  favNum = atoi(argv[i]);
+	favNum--; // Convert from 1 based to 0 based.
+	break;
+      }
+    }
+    else {
+      favNam = argv[i];
+    }
+  } 
+
 	#ifdef _PSP_FW_VERSION
 	pspDebugScreenInit();
 	motion_loaded = motionLoad() >= 0;
@@ -1705,7 +1793,7 @@ int main(int argc, char *argv[])
 	extern int GPS_load(void);
 	gps_loaded = GPS_load() >= 0;
 	#endif
-	init();
+	init(favNum);
 	loop();
 	return 0;
 }

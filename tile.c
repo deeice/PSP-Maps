@@ -308,6 +308,7 @@ SDL_Surface* gettile(int x, int y, int z, int s)
         
 	if (netOff) {
             tile = zoomSurface(na, 1, 1, 0);
+            // This would be faster, but does not reload if we turn netON.
             savememory(x, y, z, s, tile);
             return tile;
         }
