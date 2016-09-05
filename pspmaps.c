@@ -1705,8 +1705,8 @@ void loop()
                         static int gps_ctr = 0;
 			float latitude, longitude;
                         gps_ctr++;
-                        gps_ctr &= 0xf;
-			if ((gps_ctr == 0) && GPS_get_fix(&latitude, &longitude))
+                        gps_ctr &= 0xf; // For get_fix: 0 = no connection, 1 = no fix.
+			if ((gps_ctr == 0) && (GPS_get_fix(&latitude, &longitude) > 1))
 			{
                                 static float save_lat = 0.0;
                                 static float save_lon = 0.0;

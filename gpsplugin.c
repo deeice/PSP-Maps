@@ -177,31 +177,8 @@ void* GPS_thread_run(void *arg)
 /******************************************************************/
 int GPS_thread_init(void)
 {
-  switch ((*GPSD_units)()) {
-  case imperial:
-    altfactor = METERS_TO_FEET;
-    altunits = "ft";
-    speedfactor = MPS_TO_MPH;
-    speedunits = "mph";
-    break;
-  case nautical:
-    altfactor = METERS_TO_FEET;
-    altunits = "ft";
-    speedfactor = MPS_TO_KNOTS;
-    speedunits = "knots";
-    break;
-  case metric:
-    altfactor = 1;
-    altunits = "m";
-    speedfactor = MPS_TO_KPH;
-    speedunits = "kph";
-    break;
-  default:
-    /* leave the default alone */
-    break;
-  }
-
   (*GPSD_source_spec)(NULL, &source);
+  fprintf(stderr, "Connecting to gpsd at %s:%s\n", source.server, source.port);
 
   /* Open the stream to gpsd. */
   if ((*GPS_open)(source.server, source.port, &gpsdata) != 0) {
@@ -210,7 +187,34 @@ int GPS_thread_init(void)
 		  errno, GPS_errstr(errno));
     return -1;
   }
-
+  /*
+  switch ((*GPSD_units)()) {
+  case imperial:
+    fprintf(stderr, "Using imperial units.\n");
+    altfactor = METERS_TO_FEET;
+    altunits = "ft";
+    speedfactor = MPS_TO_MPH;
+    speedunits = "mph";
+    break;
+  case nautical:
+    fprintf(stderr, "Using nautical units.\n");
+    altfactor = METERS_TO_FEET;
+    altunits = "ft";
+    speedfactor = MPS_TO_KNOTS;
+    speedunits = "knots";
+    break;
+  case metric:
+    fprintf(stderr, "Using metric units.\n");
+    altfactor = 1;
+    altunits = "m";
+    speedfactor = MPS_TO_KPH;
+    speedunits = "kph";
+    break;
+  default:
+    fprintf(stderr, "Using default units.\n");
+    break;
+  }
+  */
   if(pthread_create(&gps_thread, NULL, &GPS_thread_run, NULL))
   {
       fprintf(stderr,"Unable to spawn gpsd thread\n");
@@ -256,9 +260,11 @@ void* NMEA_thread_run(void *arg)
 /******************************************************************/
 int GPS_load(void)
 {
-  void *handle;
+  void *handle = NULL;
   char *error;
   int retval = 1; // Hope for the best.  Assume success.
+  int fd = -1;
+  FILE *f;
 
   fprintf(stderr, "Creating gps mutex\n");
 
@@ -269,7 +275,47 @@ int GPS_load(void)
     return -1;
   }
 
-  handle = dlopen("libgps.so.21", RTLD_LAZY);
+  // First check for config file.  Then guess...
+  if ((f = fopen("data/gps.dat", "r")) != NULL)
+  {
+    int baud = B4800;
+    char buf[128];
+
+    sprintf(NMEA_device, "/dev/ttyS1");
+    while (fgets(buf, sizeof buf, f) != NULL)
+    {
+      //fprintf(stderr,"gps.dat - [%s]\n",buf);
+      if (sscanf(buf, "device: %s", NMEA_device) == 1) 
+	{}
+      else if (sscanf(buf, "baud: %d", &fd) == 1) {
+        switch (fd) {
+        case 4800: 
+          baud = B4800; break;
+        case 9600: 
+          baud = B9600; break;
+        case 38400: 
+          baud = B38400; break;
+        }
+      }
+      // else we could also sscanf for "host", "port" for gpsd connection.
+    }
+    fclose(f);
+
+    if (!strstr(NMEA_device, "gpsd")) {
+      fprintf(stderr,"Attempting raw NMEA on %s at %d bps.\n", NMEA_device, fd);
+      fd = openPort(NMEA_device, baud);
+      retval = -3;
+    }
+  }
+
+  if (retval == 1) {
+    handle = dlopen("libgps.so.21", RTLD_LAZY);
+    if (!handle) {
+      fprintf(stderr, "%s\n", dlerror());
+      retval = -3;
+    }
+  }
+
   if (handle)
   {
     dlerror();    /* Clear any existing error */
@@ -302,24 +348,31 @@ int GPS_load(void)
       fprintf(stderr, "Skipping gpsd thread.\n");
       retval = -2;
     }
-
-  }
-  else {
-    fprintf(stderr, "%s\n", dlerror());
-    retval = -3;
+    else
+      return retval;
   }
 
   // If no luck with gpsd, try raw NMEA.
-  if (retval < 0)
   {
-    int fd;
-
-    fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
-    fd = openPort(NMEA_device, B4800);
+    if (fd < 0) {
+      sprintf(NMEA_device, "/dev/ttyUSB0");
+      fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
+      fd = openPort(NMEA_device, B4800);
+    }
     if (fd < 0) {
       sprintf(NMEA_device, "/dev/ttyUSB1");
       fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
       fd = openPort(NMEA_device, B4800);
+    }
+    if (fd < 0) {
+      sprintf(NMEA_device, "/dev/ttyS1");
+      fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
+      fd = openPort(NMEA_device, B9600);
+    }
+    if (fd < 0) {
+      sprintf(NMEA_device, "/dev/ttyS2");
+      fprintf(stderr,"Attempting raw NMEA on %s.\n", NMEA_device);
+      fd = openPort(NMEA_device, B9600);
     }
     if (fd < 0) {
       fprintf(stderr,"Failed to open port %s\n", NMEA_device);

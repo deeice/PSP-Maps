@@ -20,6 +20,10 @@ extern "C" {
 #include <time.h>
 #include <math.h>
 
+#ifndef NAN
+#define NAN (0)
+#endif
+
 #define MINMEA_MAX_LENGTH 80
 
 enum minmea_sentence_id {
