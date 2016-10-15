@@ -116,8 +116,11 @@ int GPS_thread_quit(void)
   // Probably need to signal the gps thread to give it up before the join.
 
   /* We're done talking to gpsd. */
-  (void)(*GPS_close)(&gpsdata);
-
+  if (strstr(NMEA_device, "gpsd"))
+    (void)(*GPS_close)(&gpsdata);
+  else
+    pthread_kill(gps_thread,SIGHUP); // stop the fgets() with EINTR.
+  
   if(pthread_join(gps_thread, NULL))
   {
     printf("Could not join thread\n");
@@ -349,7 +352,10 @@ int GPS_load(void)
       retval = -2;
     }
     else
+    {
+      sprintf(NMEA_device, "gpsd");
       return retval;
+    }
   }
 
   // If no luck with gpsd, try raw NMEA.

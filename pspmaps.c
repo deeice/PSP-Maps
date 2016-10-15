@@ -384,8 +384,13 @@ void quit()
 	#ifdef _PSP_FW_VERSION
 	sceKernelExitGame();
 	#else
+	{
+	extern int GPS_thread_quit(void);
 	printf("quit!\n");
+	GPS_thread_quit();
+	printf("done.\n");
 	exit(0);
+	}
 	#endif
 }
 
